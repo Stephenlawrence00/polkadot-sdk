@@ -31,6 +31,9 @@ use derive_where::derive_where;
 use frame_support::dispatch::GetDispatchInfo;
 use scale_info::TypeInfo;
 
+#[macro_use]
+mod xcm_instructions;
+
 pub mod v3;
 pub mod v4;
 pub mod v5;
