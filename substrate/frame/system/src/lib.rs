@@ -1112,6 +1112,20 @@ pub mod pallet {
 	#[pallet::whitelist_storage]
 	pub type ExtrinsicWeightReclaimed<T: Config> = StorageValue<_, Weight, ValueQuery>;
 
+	/// Whether a dispatch nested inside the current extrinsic failed.
+	///
+	/// Dispatchables that dispatch other calls and report success regardless of their outcome,
+	/// such as `pallet_utility::batch` or `pallet_proxy::proxy`, note the failure of an inner
+	/// dispatch here through [`Pallet::note_nested_dispatch_failure`]. This lets post dispatch
+	/// logic, such as a transaction extension, tell an extrinsic that genuinely succeeded from
+	/// one that only reports success from the outside.
+	///
+	/// This information is available until the end of the extrinsic execution. More precisely
+	/// this information is removed in `note_applied_extrinsic`.
+	#[pallet::storage]
+	#[pallet::whitelist_storage]
+	pub type ExtrinsicNestedDispatchFailure<T: Config> = StorageValue<_, bool, ValueQuery>;
+
 	#[derive(frame_support::DefaultNoBound)]
 	#[pallet::genesis_config]
 	pub struct GenesisConfig<T: Config> {
@@ -2378,6 +2392,7 @@ impl<T: Config> Pallet<T> {
 		storage::unhashed::put(well_known_keys::EXTRINSIC_INDEX, &next_extrinsic_index);
 		ExecutionPhase::<T>::put(Phase::ApplyExtrinsic(next_extrinsic_index));
 		ExtrinsicWeightReclaimed::<T>::kill();
+		ExtrinsicNestedDispatchFailure::<T>::kill();
 	}
 
 	/// To be called immediately after `note_applied_extrinsic` of the last extrinsic of the block
@@ -2458,6 +2473,22 @@ impl<T: Config> Pallet<T> {
 		let actual_hash = T::Hashing::hash(code);
 		ensure!(actual_hash == authorization.code_hash, Error::<T>::Unauthorized);
 		Ok(authorization)
+	}
+
+	/// Note that a call dispatched from within the current extrinsic failed.
+	///
+	/// To be called by dispatchables that dispatch other calls and report success regardless of
+	/// their outcome, such as `pallet_utility::batch` or `pallet_proxy::proxy`, so that post
+	/// dispatch logic can tell such an extrinsic apart from one that genuinely succeeded. See
+	/// [`ExtrinsicNestedDispatchFailure`].
+	pub fn note_nested_dispatch_failure() {
+		ExtrinsicNestedDispatchFailure::<T>::put(true);
+	}
+
+	/// Whether a call dispatched from within the current extrinsic failed, even though the
+	/// extrinsic itself may have reported success. See [`ExtrinsicNestedDispatchFailure`].
+	pub fn nested_dispatch_failed() -> bool {
+		ExtrinsicNestedDispatchFailure::<T>::get()
 	}
 
 	/// Reclaim the weight for the extrinsic given info and post info.

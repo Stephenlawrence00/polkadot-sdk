@@ -1050,6 +1050,98 @@ fn operational_surcharge_does_not_affect_priority() {
 	assert_eq!(priority_with_surcharge(0), priority_with_surcharge(10));
 }
 
+/// A wrapper call such as `Utility::batch` reports success even when one of the calls it
+/// dispatches fails, so the surcharge must not be refunded in that case either.
+fn failed_operational_batch_keeps_surcharge(force_batch: bool) {
+	use sp_runtime::traits::Dispatchable;
+
+	ExtBuilder::default().balance_factor(10000).build().execute_with(|| {
+		System::set_block_number(1);
+		OperationalFeeSurcharge::set(10);
+
+		// A signed sender cannot execute this root-only `Operational` call.
+		let inner = RuntimeCall::System(frame_system::Call::set_storage { items: vec![] });
+		let call = RuntimeCall::Utility(if force_batch {
+			pallet_utility::Call::force_batch { calls: vec![inner] }
+		} else {
+			pallet_utility::Call::batch { calls: vec![inner] }
+		});
+		// The wrapper inherits the `Operational` class of the call it wraps.
+		let info = call.get_dispatch_info();
+		assert_eq!(info.class, DispatchClass::Operational);
+		let len = call.encoded_size();
+		let surcharge = TransactionPayment::compute_operational_surcharge(len as u32, &info);
+		assert!(surcharge > 0);
+		let prev_balance = Balances::free_balance(2);
+
+		let post_info = Ext::from(0)
+			.test_run(Some(2).into(), &call, &info, len, 0, |origin| call.clone().dispatch(origin))
+			.unwrap()
+			.unwrap();
+
+		// The wrapper reported success despite the inner `BadOrigin` error.
+		System::assert_has_event(RuntimeEvent::Utility(if force_batch {
+			pallet_utility::Event::ItemFailed { error: DispatchError::BadOrigin }
+		} else {
+			pallet_utility::Event::BatchInterrupted { index: 0, error: DispatchError::BadOrigin }
+		}));
+
+		// The surcharge is still forfeited, so wrapping cannot make failing operational spam
+		// any cheaper.
+		let fee = TransactionPayment::compute_actual_fee(len as u32, &info, &post_info, 0);
+		assert_eq!(prev_balance - Balances::free_balance(2), fee + surcharge);
+	});
+}
+
+#[test]
+fn operational_batch_failure_keeps_surcharge() {
+	failed_operational_batch_keeps_surcharge(false);
+}
+
+#[test]
+fn operational_force_batch_failure_keeps_surcharge() {
+	failed_operational_batch_keeps_surcharge(true);
+}
+
+#[test]
+fn nested_dispatch_failure_does_not_outlive_its_extrinsic() {
+	use sp_runtime::traits::Dispatchable;
+
+	ExtBuilder::default().balance_factor(10000).build().execute_with(|| {
+		System::set_block_number(1);
+		OperationalFeeSurcharge::set(10);
+
+		// First extrinsic: a batch whose inner call fails, which forfeits the surcharge.
+		let batch = RuntimeCall::Utility(pallet_utility::Call::force_batch {
+			calls: vec![RuntimeCall::System(frame_system::Call::set_storage { items: vec![] })],
+		});
+		let batch_info = batch.get_dispatch_info();
+		let batch_len = batch.encoded_size();
+		Ext::from(0)
+			.test_run(Some(2).into(), &batch, &batch_info, batch_len, 0, |origin| {
+				batch.clone().dispatch(origin)
+			})
+			.unwrap()
+			.unwrap();
+		assert!(System::nested_dispatch_failed());
+
+		// Ending the extrinsic clears the noted failure.
+		System::note_applied_extrinsic(&Ok(default_post_info()), batch_info);
+		assert!(!System::nested_dispatch_failed());
+
+		// Second extrinsic: a successful operational transaction still gets its refund.
+		let len = 10;
+		let info = op_info_from_weight(Weight::from_parts(100, 0));
+		let fee = TransactionPayment::compute_fee(len as u32, &info, 0);
+		let prev_balance = Balances::free_balance(2);
+		Ext::from(0)
+			.test_run(Some(2).into(), CALL, &info, len, 0, |_| Ok(default_post_info()))
+			.unwrap()
+			.unwrap();
+		assert_eq!(Balances::free_balance(2), prev_balance - fee);
+	});
+}
+
 #[test]
 fn fungible_adapter_no_zero_refund_action() {
 	type FungibleAdapterT = payment::FungibleAdapter<Balances, DealWithFees>;

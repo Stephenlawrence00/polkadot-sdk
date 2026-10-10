@@ -7,6 +7,16 @@ doc:
     `Config::OperationalFeeSurcharge` constant. When set to `N`, an extra `N * inclusion_fee`
     (tip excluded) is withdrawn upfront and refunded only if the dispatch succeeds, so failing
     operational transactions forfeit it while honest ones pay as before. Priority is unaffected.
+    The surcharge is applied by `pallet-asset-tx-payment` and
+    `pallet-asset-conversion-tx-payment` as well, for payments in the native currency and in an
+    asset alike.
+
+    Some dispatchables report success regardless of the outcome of the calls they dispatch, for
+    example `Utility::batch`, `Utility::force_batch` and `Proxy::proxy`, and they inherit the
+    `Operational` class of the call they wrap. Those now note the failure of an inner dispatch in
+    the new transient `frame_system::ExtrinsicNestedDispatchFailure` storage value, through
+    `frame_system::Pallet::note_nested_dispatch_failure`, so that wrapping a failing operational
+    call cannot recover the surcharge.
 
     Breaking: every runtime must now set `type OperationalFeeSurcharge`. Use `()` (the default,
     behavior unchanged) to keep it disabled; all in-tree runtimes do so.
@@ -14,6 +24,12 @@ doc:
 crates:
 - name: pallet-transaction-payment
   bump: major
+- name: frame-system
+  bump: minor
+- name: pallet-utility
+  bump: patch
+- name: pallet-proxy
+  bump: patch
 - name: kitchensink-runtime
   bump: minor
 - name: parachain-template-runtime
@@ -51,9 +67,9 @@ crates:
 - name: polkadot-test-runtime
   bump: minor
 - name: pallet-asset-tx-payment
-  bump: patch
+  bump: major
 - name: pallet-asset-conversion-tx-payment
-  bump: none
+  bump: major
 - name: bridge-runtime-common
   bump: none
 - name: pallet-bridge-relayers

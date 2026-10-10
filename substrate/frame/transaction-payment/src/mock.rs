@@ -35,6 +35,7 @@ frame_support::construct_runtime!(
 		System: system,
 		Balances: pallet_balances,
 		TransactionPayment: pallet_transaction_payment::{Pallet, Storage, Event<T>},
+		Utility: pallet_utility,
 	}
 );
 
@@ -138,6 +139,13 @@ impl Config for Runtime {
 	type LengthToFee = TransactionByteFee;
 	type FeeMultiplierUpdate = ();
 	type WeightInfo = MockWeights;
+}
+
+impl pallet_utility::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type PalletsOrigin = OriginCaller;
+	type WeightInfo = ();
 }
 
 #[cfg(feature = "runtime-benchmarks")]

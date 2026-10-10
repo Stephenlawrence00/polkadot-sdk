@@ -716,6 +716,13 @@ impl<T: Config> Pallet<T> {
 		base_fee.saturating_mul(multiplier.into())
 	}
 
+	/// Whether a withdrawn surcharge (see [`Config::OperationalFeeSurcharge`]) must be kept
+	/// instead of refunded.
+	pub fn keep_operational_surcharge(surcharge: BalanceOf<T>, result: &DispatchResult) -> bool {
+		!surcharge.is_zero() &&
+			(result.is_err() || frame_system::Pallet::<T>::nested_dispatch_failed())
+	}
+
 	/// Compute the length portion of a fee by invoking the configured `LengthToFee` impl.
 	pub fn length_to_fee(length: u32) -> BalanceOf<T> {
 		T::LengthToFee::weight_to_fee(&Weight::from_parts(length as u64, 0))
@@ -1111,7 +1118,7 @@ where
 		// Refund the surcharge on success, keep it on failure.
 		let actual_fee_with_tip = {
 			let corrected = Pallet::<T>::compute_actual_fee(len as u32, info, &post_info, tip);
-			if result.is_err() {
+			if Pallet::<T>::keep_operational_surcharge(surcharge, result) {
 				corrected.saturating_add(surcharge)
 			} else {
 				corrected
